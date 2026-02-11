@@ -5,6 +5,7 @@
 #include <vector>
 #include <functional>
 #include <optional>
+#include <chrono>
 #include <nlohmann/json.hpp>
 
 #include "game/player.h"
@@ -25,6 +26,7 @@ inline std::string room_state_str(RoomState s) {
 class Room {
 public:
     using BroadcastFn = std::function<void(const std::string& player_id, const std::string& message)>;
+    using Clock = std::chrono::steady_clock;
 
     explicit Room(std::string id, int max_players = 4);
 
@@ -46,7 +48,7 @@ public:
 
     // ── Gameplay (Phase 2) ──────────────────────────
     void start_game();
-    void update(float dt);                          // Called every tick
+    void update(float dt);
     void queue_input(const std::string& player_id,
                      int tick,
                      const std::vector<std::string>& actions);
@@ -63,6 +65,9 @@ public:
     int max_players() const { return max_players_; }
     int current_tick() const { return tick_; }
 
+    // ── Grace period for reconnection ───────────────
+    bool should_cleanup() const;
+
     // ── State snapshots ─────────────────────────────
     nlohmann::json lobby_state() const;
     nlohmann::json game_state() const;
@@ -75,6 +80,13 @@ private:
 
     std::unordered_map<std::string, Player> players_;
     BroadcastFn broadcast_fn_;
+
+    // Track disconnected players for reconnection during PLAYING
+    std::unordered_map<std::string, Player> disconnected_players_;
+
+    // Grace period: keep room alive for 30s after last player leaves
+    static constexpr int GRACE_SECONDS = 30;
+    std::optional<Clock::time_point> empty_since_;
 
     // Spawn positions for up to 4 players
     static constexpr float spawn_positions_[][2] = {

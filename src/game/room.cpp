@@ -9,21 +9,39 @@ Room::Room(std::string id, int max_players)
 // ── Player management ───────────────────────────────
 
 bool Room::add_player(const Player& player) {
-    if (is_full()) return false;
     if (has_player(player.id)) return false;
-    if (state_ == RoomState::FINISHED) return false;
 
     Player p = player;
 
-    // If game is already running, spawn immediately
-    if (state_ == RoomState::PLAYING) {
-        int idx = next_spawn_ % 4;
-        p.spawn(spawn_positions_[idx][0], spawn_positions_[idx][1]);
-        next_spawn_++;
+    // Check if this is a reconnecting player during gameplay
+    auto disc_it = disconnected_players_.find(player.id);
+    if (disc_it != disconnected_players_.end()) {
+        // Restore their state from before disconnect
+        p = disc_it->second;
+        p.name = player.name;  // Update name in case it changed
+        p.display_name = player.display_name;
+        disconnected_players_.erase(disc_it);
+        logger::info("player " + p.id + " (" + p.name + ") reconnected to room " + id_
+                     + " at (" + std::to_string((int)p.x) + "," + std::to_string((int)p.y) + ")");
+    } else {
+        // New player
+        if (is_full()) return false;
+        if (state_ == RoomState::FINISHED) return false;
+
+        if (state_ == RoomState::PLAYING) {
+            int idx = next_spawn_ % 4;
+            p.spawn(spawn_positions_[idx][0], spawn_positions_[idx][1]);
+            next_spawn_++;
+        }
+
+        logger::info("player " + p.id + " (" + p.name + ") joined room " + id_);
     }
 
     players_.emplace(p.id, p);
-    logger::info("player " + p.id + " (" + p.name + ") joined room " + id_);
+
+    // Room is no longer empty
+    empty_since_.reset();
+
     return true;
 }
 
@@ -31,12 +49,26 @@ void Room::remove_player(const std::string& player_id) {
     auto it = players_.find(player_id);
     if (it == players_.end()) return;
 
-    logger::info("player " + player_id + " left room " + id_);
+    // If game is in progress, save player state for reconnection
+    if (state_ == RoomState::PLAYING) {
+        disconnected_players_[player_id] = it->second;
+        logger::info("player " + player_id + " disconnected from room " + id_
+                     + " (saved for reconnect, grace=" + std::to_string(GRACE_SECONDS) + "s)");
+    } else {
+        logger::info("player " + player_id + " left room " + id_);
+    }
+
     players_.erase(it);
 
     if (players_.empty()) {
-        state_ = RoomState::FINISHED;
-        logger::info("room " + id_ + " is now empty, marked finished");
+        if (state_ == RoomState::PLAYING && !disconnected_players_.empty()) {
+            // Start grace period — keep room alive for reconnection
+            empty_since_ = Clock::now();
+            logger::info("room " + id_ + " has no connected players, grace period started");
+        } else if (state_ == RoomState::WAITING) {
+            state_ = RoomState::FINISHED;
+            logger::info("room " + id_ + " is now empty, marked finished");
+        }
     }
 }
 
@@ -62,6 +94,21 @@ int Room::player_count() const {
     return static_cast<int>(players_.size());
 }
 
+bool Room::should_cleanup() const {
+    if (state_ == RoomState::FINISHED && players_.empty()) return true;
+
+    // Check grace period expiry
+    if (empty_since_) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            Clock::now() - *empty_since_).count();
+        if (elapsed >= GRACE_SECONDS) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // ── Lobby ───────────────────────────────────────────
 
 void Room::set_player_ready(const std::string& player_id, bool ready) {
@@ -79,7 +126,7 @@ void Room::set_player_ready(const std::string& player_id, bool ready) {
     logger::debug("player " + player_id + " ready=" + (ready ? "true" : "false")
                   + " in room " + id_);
 
-    // Auto-start when all players are ready
+    // Auto-start when all players are ready (min 2)
     if (all_ready() && state_ == RoomState::WAITING) {
         logger::info("all players ready in room " + id_ + " — starting game");
         start_game();
@@ -153,14 +200,29 @@ void Room::start_game() {
 void Room::update(float dt) {
     if (state_ != RoomState::PLAYING) return;
 
+    // Check grace period expiry
+    if (empty_since_) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            Clock::now() - *empty_since_).count();
+        if (elapsed >= GRACE_SECONDS) {
+            logger::info("room " + id_ + " grace period expired, marking finished");
+            state_ = RoomState::FINISHED;
+            disconnected_players_.clear();
+            return;
+        }
+    }
+
+    // Don't tick if no players are connected
+    if (players_.empty()) return;
+
     tick_++;
 
-    // 1. Process pending inputs for each player
+    // Process pending inputs for each player
     for (auto& [pid, player] : players_) {
         player.process_input(dt);
     }
 
-    // 2. Broadcast game state to all clients
+    // Broadcast game state every tick to connected players
     broadcast(game_state());
 }
 
@@ -228,10 +290,11 @@ nlohmann::json Room::game_state() const {
     return {
         {"type", "game_state"},
         {"tick", tick_},
-        {"time_left", 0.0f},                       // Phase 3: round timer
+        {"time_left", 60.0f},    // Phase 3: actual round timer
+        {"round", 1},             // Phase 3: round tracking
         {"players", players_arr},
-        {"enemies", nlohmann::json::array()},       // Phase 3: enemies
-        {"items", nlohmann::json::array()}           // Phase 3: items
+        {"enemies", nlohmann::json::array()},
+        {"items", nlohmann::json::array()}
     };
 }
 
