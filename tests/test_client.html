@@ -64,7 +64,7 @@
             const room = document.getElementById('room').value;
             const name = document.getElementById('name').value;
 
-            const url = `${host}/ws?room=${room}&name=${encodeURIComponent(name)}`;
+            const url = `${host}/ws/${room}?token=test&name=${encodeURIComponent(name)}`;
             log('msg-sys', `Connecting to ${url}...`);
 
             ws = new WebSocket(url);

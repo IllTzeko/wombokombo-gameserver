@@ -31,7 +31,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       # Multi-platform build for amd64 + arm64 (Raspberry Pi)
-
       - name: Build and push
         uses: docker/build-push-action@v5
         with:

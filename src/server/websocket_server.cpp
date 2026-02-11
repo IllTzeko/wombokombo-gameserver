@@ -97,7 +97,7 @@ void WebSocketServer::run() {
     // That means no locks needed for rooms_ or player_sockets_.
 
     uWS::App()
-        .ws<PerSocketData>("/ws", {
+        .ws<PerSocketData>("/ws/*", {
             // Settings
             .compression = uWS::DISABLED,
             .maxPayloadLength = 16 * 1024,  // 16 KB — plenty for JSON messages
@@ -111,7 +111,12 @@ void WebSocketServer::run() {
                 auto full_url = url + "?" + query_str;
                 auto params = parse_query(full_url);
 
-                std::string room_id = params.count("room") ? params["room"] : "";
+                // Extract room code from path: /ws/{roomCode}
+                std::string room_id;
+                if (url.rfind("/ws/", 0) == 0 && url.size() > 4) {
+                    room_id = url.substr(4);  // strip "/ws/"
+                }
+
                 std::string token = params.count("token") ? params["token"] : "";
                 std::string name = params.count("name") ? params["name"] : "Player";
 
