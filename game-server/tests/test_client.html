@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WomboCombo — Game Server Test Client</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+        h1 { color: #ff6b6b; margin-bottom: 20px; }
+        .panel { background: #16213e; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+        label { display: block; margin-bottom: 4px; color: #a0a0a0; font-size: 12px; }
+        input, button { font-family: monospace; font-size: 14px; padding: 8px 12px; border: none; border-radius: 4px; }
+        input { background: #0f3460; color: #e0e0e0; width: 200px; margin-right: 8px; }
+        button { background: #e94560; color: white; cursor: pointer; }
+        button:hover { background: #ff6b6b; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #log { background: #0a0a1a; border-radius: 8px; padding: 12px; height: 400px; overflow-y: auto;
+               font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+        .msg-in { color: #00ff88; }
+        .msg-out { color: #66bbff; }
+        .msg-err { color: #ff6b6b; }
+        .msg-sys { color: #888; }
+        .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+    </style>
+</head>
+<body>
+    <h1>WomboCombo Test Client (Phase 1)</h1>
+
+    <div class="panel">
+        <div class="row">
+            <div><label>Server</label><input id="host" value="ws://localhost:9001"></div>
+            <div><label>Room ID</label><input id="room" value="test-room"></div>
+            <div><label>Name</label><input id="name" value="Player1"></div>
+            <button id="btnConnect" onclick="connect()">Connect</button>
+            <button id="btnDisconnect" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="row">
+            <div><label>Chat</label><input id="chatMsg" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendChat()"></div>
+            <button onclick="sendChat()">Send Chat</button>
+            <button onclick="sendReady(true)">Ready</button>
+            <button onclick="sendReady(false)">Not Ready</button>
+        </div>
+    </div>
+
+    <div id="log"></div>
+
+    <script>
+        let ws = null;
+
+        function log(cls, text) {
+            const el = document.getElementById('log');
+            const line = document.createElement('div');
+            line.className = cls;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+            el.appendChild(line);
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function connect() {
+            const host = document.getElementById('host').value;
+            const room = document.getElementById('room').value;
+            const name = document.getElementById('name').value;
+
+            const url = `${host}/ws/${room}?token=test&name=${encodeURIComponent(name)}`;
+            log('msg-sys', `Connecting to ${url}...`);
+
+            ws = new WebSocket(url);
+
+            ws.onopen = () => {
+                log('msg-sys', 'Connected!');
+                document.getElementById('btnConnect').disabled = true;
+                document.getElementById('btnDisconnect').disabled = false;
+            };
+
+            ws.onmessage = (e) => {
+                log('msg-in', '← ' + e.data);
+                try {
+                    const msg = JSON.parse(e.data);
+                    // Could add UI updates here based on message type
+                } catch {}
+            };
+
+            ws.onclose = (e) => {
+                log('msg-sys', `Disconnected (code=${e.code})`);
+                document.getElementById('btnConnect').disabled = false;
+                document.getElementById('btnDisconnect').disabled = true;
+                ws = null;
+            };
+
+            ws.onerror = () => {
+                log('msg-err', 'WebSocket error');
+            };
+        }
+
+        function disconnect() {
+            if (ws) ws.close();
+        }
+
+        function send(obj) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('msg-err', 'Not connected');
+                return;
+            }
+            const json = JSON.stringify(obj);
+            ws.send(json);
+            log('msg-out', '→ ' + json);
+        }
+
+        function sendChat() {
+            const input = document.getElementById('chatMsg');
+            if (!input.value.trim()) return;
+            send({ type: "chat_message", message: input.value });
+            input.value = '';
+        }
+
+        function sendReady(ready) {
+            send({ type: "player_ready", ready });
+        }
+    </script>
+</body>
+</html>
