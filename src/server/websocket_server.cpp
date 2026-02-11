@@ -123,8 +123,8 @@ game::Room* WebSocketServer::get_room(const std::string& room_id) {
 
 void WebSocketServer::cleanup_empty_rooms() {
     for (auto it = rooms_.begin(); it != rooms_.end();) {
-        if (it->second->is_empty() && it->second->state() == game::RoomState::FINISHED) {
-            logger::info("cleaning up empty room " + it->first);
+        if (it->second->should_cleanup()) {
+            logger::info("cleaning up room " + it->first);
             it = rooms_.erase(it);
         } else {
             ++it;
@@ -235,9 +235,13 @@ void WebSocketServer::run() {
                 }
 
                 if (room->is_full()) {
-                    res->writeStatus("403 Forbidden")
-                       ->end("Room is full");
-                    return;
+                    // Allow if player is reconnecting (saved in disconnected list)
+                    bool is_reconnect = (room->state() == game::RoomState::PLAYING);
+                    if (!is_reconnect) {
+                        res->writeStatus("403 Forbidden")
+                           ->end("Room is full");
+                        return;
+                    }
                 }
                 if (room->state() == game::RoomState::FINISHED) {
                     res->writeStatus("403 Forbidden")
@@ -297,8 +301,24 @@ void WebSocketServer::run() {
                 room->broadcast_except(data->player_id,
                     network::make_player_joined(data->player_id, data->player_name));
 
-                // Send lobby state to everyone
-                room->broadcast(room->lobby_state());
+                // Send appropriate state based on room phase
+                if (room->state() == game::RoomState::PLAYING) {
+                    // Player reconnected during gameplay — send game state
+                    room->send_to(data->player_id, {
+                        {"type", "game_start"},
+                        {"round", 1},
+                        {"map_data", {
+                            {"width", game::physics::MAP_WIDTH},
+                            {"height", game::physics::MAP_HEIGHT},
+                            {"ground_y", game::physics::GROUND_Y}
+                        }},
+                        {"spawn_points", nlohmann::json::array()}
+                    });
+                    logger::info("sent game_start to reconnected player " + data->player_id);
+                } else {
+                    // Send lobby state to everyone
+                    room->broadcast(room->lobby_state());
+                }
             },
 
             // ── Message received ─────────────────────────────
