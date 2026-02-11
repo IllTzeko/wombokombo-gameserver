@@ -268,7 +268,7 @@ void WebSocketServer::run() {
 
                 // Send "connected" to the new player
                 room->send_to(data->player_id,
-                              network::make_connected(data->player_id, room->current_tick()));
+                              network::make_connected(data->player_id, data->player_name, room->current_tick()));
 
                 // Notify others
                 room->broadcast_except(data->player_id,
