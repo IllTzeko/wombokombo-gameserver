@@ -9,11 +9,13 @@
 namespace game {
 
 // Simple 2D physics constants — must match the client's Phaser config
+// Client ground: tiles at y=704 (center), top surface at y=688
+// Player body: 32px tall, origin 0.5 → sprite.y when on ground = 688 - 16 = 672
 namespace physics {
     constexpr float MOVE_SPEED    = 220.0f;   // px/s — matches client PLAYER_SPEED
     constexpr float JUMP_VELOCITY = -420.0f;  // px/s — matches client PLAYER_JUMP
     constexpr float GRAVITY       = 800.0f;   // px/s² — matches client physics gravity
-    constexpr float GROUND_Y      = 688.0f;   // ground level — client arena ground tiles at y=704, player center at 704-16=688
+    constexpr float GROUND_Y      = 672.0f;   // sprite center Y when standing on ground
     constexpr float MAP_WIDTH     = 1280.0f;
     constexpr float MAP_HEIGHT    = 720.0f;
 }
@@ -134,4 +136,4 @@ struct Player {
     }
 };
 
-} // namespace game
+}
